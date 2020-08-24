@@ -232,7 +232,6 @@ void    SD2SnesDevice::sendCommand(SD2Snes::opcode opcode, SD2Snes::space space,
 void    SD2SnesDevice::sendVCommand(SD2Snes::opcode opcode, SD2Snes::space space, unsigned char flags,
                                     const QList<QPair<unsigned int, quint8> >& args)
 {
-    int filer_size = 64 - 7;
     // SD2Snes expect this flags for vget and vput
     flags |= SD2Snes::server_flags::DATA64B | SD2Snes::server_flags::NORESP;
     blockSize = 64;
@@ -242,22 +241,27 @@ void    SD2SnesDevice::sendVCommand(SD2Snes::opcode opcode, SD2Snes::space space
     data.append(static_cast<char>(opcode));
     data.append(static_cast<char>(space));
     data.append(static_cast<char>(flags));
-    data.append(QByteArray().fill(0, filer_size));
-    int i = 0;
+
     int tsize = 0;
     foreach (auto infos, args) {
-        data[32 + i * 4] = static_cast<char>(infos.second);
-        data[33 + i * 4] = static_cast<char>((infos.first >> 16) & 0xFF);
-        data[34 + i * 4] = static_cast<char>((infos.first >> 8) & 0xFF);
-        data[35 + i * 4] = static_cast<char>(infos.first & 0xFF);
-        i++;
+        data.append(static_cast<char>(infos.second));
+        data.append(static_cast<char>((infos.first >> 16) & 0xFF));
+        data.append(static_cast<char>((infos.first >> 8) & 0xFF));
+        data.append(static_cast<char>(infos.first & 0xFF));
+
         tsize += infos.second;
     }
+    data.append(QByteArray().fill(0, blockSize - blockSize % data.size()));
+
     sDebug() << "VCMD Sending : " << data;
     if (opcode == SD2Snes::opcode::VGET)
+    {
         m_getSize = tsize;
-    if (opcode == SD2Snes::opcode::VPUT)
-        m_putSize = tsize + blockSize;
+    }
+    else if (opcode == SD2Snes::opcode::VPUT)
+    {
+        m_putSize = data.size();
+    }
     m_state = BUSY;
     m_currentCommand = opcode;
     writeData(data);
@@ -281,10 +285,28 @@ void SD2SnesDevice::writeData(QByteArray data)
     auto sendSize = data.size();
 
     if (data.size() < blockSize)
+    {
         data.append(QByteArray().fill(0, blockSize - data.size()));
+    }
     if (data.size() % blockSize != 0)
     {
+        // TODO: this resize has two issues - it won't initialize the appended bytes
+        // and it won't set m_putSize
+        // The code should probably read:
+        /*
+
+    data.append(QByteArray().fill(0, blockSize - blockSize % data.size()));
+    if (m_currentCommand == SD2Snes::VPUT)
+    {
+        m_putSize = data.size();
+    }
+
+         */
+        // and the logic around setting block sizes should go away in sendVCommand, etc
+        // probably also sendSize shouldn't exist as a variable
+
         data.resize((data.size() / blockSize) * blockSize + blockSize);
+
     }
 
 #ifdef Q_OS_MACOS
